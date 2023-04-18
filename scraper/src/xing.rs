@@ -1,13 +1,11 @@
 use std::cmp::min;
 
-use reqwest::{Client, header::HeaderName};
-use serde::{Serialize, Deserialize};
-use serde_json::json;
 use log;
+use reqwest::{header::HeaderName, Client};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 type Result<T> = std::result::Result<T, crate::api::Error>;
-
-
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -16,7 +14,6 @@ struct KununuData {
     rating_average: f32,
     rating_count: u32,
 }
-
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -44,8 +41,7 @@ struct Job {
     path: Option<String>,
     slug: Option<String>,
     title: String,
-    tracking_token: Option<String>
-
+    tracking_token: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -60,46 +56,59 @@ struct MetaData {
     max_page: u32,
 }
 
-
-
 #[derive(Serialize, Deserialize, Debug)]
 pub struct JobSearch {
     items: Vec<Job>,
     meta: MetaData,
 }
 
-fn job_search_url(offset: u32, results: u32, search: Option<&str>) -> String {
-    let mut url = format!("https://www.xing.com/jobs/api/search?offset={}&limit={}",offset, results);
-    if let Some(search) = search {
-        url.push_str(format!("&keywords={}", search).as_str());
-    }
-    url
+fn job_search_url(offset: u32, results: u32, search: &str) -> String {
+    format!(
+        "https://www.xing.com/jobs/api/search?offset={}&limit={}&keywords={}",
+        offset, results, search
+    )
 }
 
-async fn scrape_job_search_page(client: &Client, offset: u31, results: u32, search: Option<&str>) -> Result<JobSearch> {
+async fn scrape_job_search_page(
+    client: &Client,
+    offset: u32,
+    results: u32,
+    search: &str,
+) -> Result<JobSearch> {
     let url = job_search_url(offset, results, search);
-    log::info!("GET {}", url);
-    let resp = client.get(url)
+    log::info!(
+        "requesting jobs from xing, offset: {}, search: {}",
+        offset,
+        search
+    );
+    let resp = client
+        .get(url)
         .header("Accept", "application/json")
         .send()
         .await?;
-    log::info!("response status to job search: {:?}", resp.status());
-    log::debug!("resp: {:?}", resp);
+    log::info!("response status to job search: {}", resp.status());
     let job_search: JobSearch = resp.json().await?;
     Ok(job_search)
 }
 
-pub async fn scrape(keyword: &str) -> Result<Vec<(Result<JobSearch>, u32)>> {
+/// Scrapes all job entries for a given search term
+///
+/// # Errors
+///
+/// This function will return an error if:
+/// - the request fails (status code != 200)
+/// - the parsing fails
+pub async fn scrape(keyword: &str) -> Result<Vec<Result<JobSearch>>> {
     let client = reqwest::Client::new();
     let results_per_page = 100;
-    let first_page = scrape_job_search_page(&client, 0, results_per_page).await?;
+    let first_page = scrape_job_search_page(&client, 0, results_per_page, keyword).await?;
     let last_page_index = first_page.meta.max_page;
-    let mut results = Vec::new();
+    let mut results = Vec::with_capacity(first_page.meta.count as usize);
+    results.push(Ok(first_page));
     for i in 1..min(last_page_index, 39) {
         let offset = i * results_per_page;
-        let page = scrape_job_search_page(&client, offset, results_per_page).await;
-        log::info!("Scrapged page {}, Ok?: {:?}", i, page.is_ok());
-        results.push((page, i));
+        let page = scrape_job_search_page(&client, offset, results_per_page, keyword).await;
+        results.push(page);
     }
     Ok(results)
 }
@@ -146,13 +155,14 @@ mod test {
     #[tokio::test]
     async fn test_get_and_deserialize_job_search() {
         init();
-        let _ = scrape_job_search_page(&reqwest::Client::new(), 0, 100, None).await.expect("Request failed");
+        let _ = scrape_job_search_page(&reqwest::Client::new(), 0, 100, None)
+            .await
+            .expect("Request failed");
     }
 
     #[tokio::test]
     async fn test_scrape_all() {
         init();
         let results = scrape().await;
-
     }
 }

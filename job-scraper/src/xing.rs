@@ -1,10 +1,14 @@
+use std::collections::HashSet;
 use std::{cmp::min, hash::Hash};
 
 use log;
-use reqwest::{header::HeaderName, Client};
-use scraper::ElementRef;
+use reqwest::Client;
+
+use scraper::Html;
+use scraper::Selector;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+
+use crate::types::Error;
 
 type Result<T> = std::result::Result<T, crate::types::Error>;
 
@@ -26,7 +30,7 @@ struct Company {
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
-struct XingJob {
+pub struct XingJob {
     id: u32,
     scrambled_id: String,
     company: Company,
@@ -44,7 +48,12 @@ struct XingJob {
     title: String,
     tracking_token: Option<String>,
 }
-
+impl PartialEq for XingJob {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+impl Eq for XingJob {}
 impl Hash for XingJob {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.id.hash(state);
@@ -66,7 +75,7 @@ struct MetaData {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct JobSearch {
-    items: Vec<XingJob>,
+    pub items: Vec<XingJob>,
     meta: MetaData,
 }
 
@@ -119,9 +128,13 @@ pub async fn scrape_job_search_batch(
     results
 }
 
-pub async fn scrape(client: Client, keyword: &str, workers: u32) -> Result<Vec<Result<JobSearch>>> {
+pub async fn scrape(
+    client: Client,
+    keyword: String,
+    workers: u32,
+) -> Result<Vec<Result<JobSearch>>> {
     let results_per_page = 100;
-    let first_page = scrape_job_search_page(&client, 0, results_per_page, keyword).await?;
+    let first_page = scrape_job_search_page(&client, 0, results_per_page, &keyword).await?;
     let results_count = min(first_page.meta.count, 1000);
     let mut results = Vec::with_capacity(results_count as usize);
     let last_page_index = min(first_page.meta.max_page, results_count / results_per_page);
@@ -138,7 +151,7 @@ pub async fn scrape(client: Client, keyword: &str, workers: u32) -> Result<Vec<R
         if w == workers - 1 && remainder > 0 {
             end += remainder - 1;
         }
-        let search = String::from(keyword);
+        let search = String::from(&keyword);
         let handle = tokio::spawn(scrape_job_search_batch(
             start,
             end,
@@ -158,10 +171,53 @@ pub async fn scrape(client: Client, keyword: &str, workers: u32) -> Result<Vec<R
     Ok(results)
 }
 
+pub async fn scrape_queries(queries: Vec<String>) -> HashSet<XingJob> {
+    let mut handles = Vec::with_capacity(queries.len());
+    let client = Client::new();
+    queries.into_iter().for_each(|query| {
+        let join_handle = tokio::spawn(scrape(client.clone(), query, 2));
+        handles.push(join_handle);
+    });
+    let results = futures::future::join_all(handles)
+        .await
+        .into_iter()
+        .filter_map(|x| x.ok())
+        .filter_map(|x| x.ok())
+        .flatten()
+        .filter_map(Result::ok)
+        .map(|job_search| job_search.items)
+        .flatten()
+        .collect::<HashSet<_>>();
+    results
+}
+
+pub async fn scrape_job_content(client: Client, job_url: &str) -> Result<String> {
+    let job_url = job_url;
+    let html = client.get(job_url).send().await?.text().await?;
+    let doc = Html::parse_document(&html);
+    let job_data_selector = Selector::parse(
+        ".styles-grid-gridContainer-cec162b7.styles-grid-standardGridContainer-cfa898d5",
+    )
+    .unwrap();
+    let job_data = doc
+        .select(&job_data_selector)
+        .next()
+        .ok_or(Error::ContentNotFound("Job Posting data"))?
+        .text();
+
+    let salary_selector = Selector::parse(r#"[data-cy="posting-salary"]"#).unwrap();
+    let salary_data = doc
+        .select(&salary_selector)
+        .next()
+        .ok_or(Error::ContentNotFound("Salary"))?
+        .text();
+    let data = salary_data.chain(job_data).collect::<String>();
+    return Ok(data);
+}
+
 // test module
 #[cfg(test)]
 mod test {
-    use scraper::{Html, Selector};
     use super::*;
 
     #[tokio::test]
@@ -174,7 +230,7 @@ mod test {
     #[tokio::test]
     async fn test_scrape_all_jobs() {
         let query = "React Frontend Engineer";
-        let _results = scrape(Client::new(), query, 2)
+        let _results = scrape(Client::new(), query.to_owned(), 2)
             .await
             .expect("Scraping outer function should not fail");
     }
@@ -182,21 +238,7 @@ mod test {
     #[tokio::test]
     async fn test_parse_html_for_job_posting() {
         let job_url = "https://www.xing.com/jobs/nuernberg-anwendungsentwickler-java-98960724";
-        let html = reqwest::get(job_url)
-            .await
-            .expect("Request failed")
-            .text()
-            .await
-            .expect("Could not parse response body");
-        let doc = Html::parse_document(&html);
-        let job_data_selector = Selector::parse(".styles-grid-gridContainer-cec162b7.styles-grid-standardGridContainer-cfa898d5").unwrap();
-        let job_data = doc.select(&job_data_selector).next().unwrap();
-
-        let salary_selector = Selector::parse(r#"[data-cy="posting-salary"]"#).unwrap();
-        let salary_data: Vec<&str> = doc.select(&salary_selector)
-            .map(|e| e.text().collect::<Vec<_>>())
-            .flatten()
-            .collect();
-        println!("{:?}", salary_data);
+        let data = scrape_job_content(Client::new(), job_url).await;
+        assert!(data.is_ok());
     }
 }

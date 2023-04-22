@@ -1,3 +1,5 @@
+use futures::{stream, StreamExt};
+use job_analyzer::JobPost;
 use std::collections::HashSet;
 use std::{cmp::min, hash::Hash};
 
@@ -8,9 +10,9 @@ use scraper::Html;
 use scraper::Selector;
 use serde::{Deserialize, Serialize};
 
-use crate::types::Error;
+use crate::api::Error;
 
-type Result<T> = std::result::Result<T, crate::types::Error>;
+type Result<T> = std::result::Result<T, crate::api::Error>;
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -48,6 +50,7 @@ pub struct XingJob {
     title: String,
     tracking_token: Option<String>,
 }
+
 impl PartialEq for XingJob {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
@@ -65,16 +68,14 @@ impl Hash for XingJob {
 #[serde(rename_all = "camelCase")]
 struct MetaData {
     count: u32,
-
     #[serde(alias = "currentPage")]
     current_page: u32,
-
     #[serde(alias = "maxPage")]
     max_page: u32,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct JobSearch {
+pub struct ApiResponse {
     pub items: Vec<XingJob>,
     meta: MetaData,
 }
@@ -91,7 +92,7 @@ async fn scrape_job_search_page(
     offset: u32,
     results: u32,
     search: &str,
-) -> Result<JobSearch> {
+) -> Result<ApiResponse> {
     let url = job_search_url(offset, results, search);
     log::info!(
         "requesting jobs from xing, offset: {}, search: {}",
@@ -103,12 +104,21 @@ async fn scrape_job_search_page(
         .header("Accept", "application/json")
         .send()
         .await?;
-    log::info!("response status to job search: {}", resp.status());
     if !resp.status().is_success() {
-        return Err(crate::types::Error::RequestNotOk(url));
+        log::error!(
+            "failed to retrieve results for offset{}, search: {}",
+            offset,
+            search
+        );
+        return Err(crate::api::Error::RequestNotOk(url));
     }
 
-    let job_search: JobSearch = resp.json().await?;
+    log::info!(
+        "successfully retrieved results for offset{}, search: {}",
+        offset,
+        search
+    );
+    let job_search: ApiResponse = resp.json().await?;
     Ok(job_search)
 }
 
@@ -118,7 +128,7 @@ pub async fn scrape_job_search_batch(
     search: String,
     results_per_page: u32,
     client: Client,
-) -> Vec<Result<JobSearch>> {
+) -> Vec<Result<ApiResponse>> {
     let mut results = Vec::with_capacity((end - start) as usize);
     for page in start..end {
         let offset = page * results_per_page;
@@ -132,7 +142,7 @@ pub async fn scrape(
     client: Client,
     keyword: String,
     workers: u32,
-) -> Result<Vec<Result<JobSearch>>> {
+) -> Result<Vec<Result<ApiResponse>>> {
     let results_per_page = 100;
     let first_page = scrape_job_search_page(&client, 0, results_per_page, &keyword).await?;
     let results_count = min(first_page.meta.count, 1000);
@@ -151,11 +161,10 @@ pub async fn scrape(
         if w == workers - 1 && remainder > 0 {
             end += remainder - 1;
         }
-        let search = String::from(&keyword);
         let handle = tokio::spawn(scrape_job_search_batch(
             start,
             end,
-            search,
+            String::from(&keyword),
             results_per_page,
             client,
         ));
@@ -171,7 +180,7 @@ pub async fn scrape(
     Ok(results)
 }
 
-pub async fn scrape_queries(queries: Vec<String>) -> HashSet<XingJob> {
+pub async fn scrape_queries(queries: Vec<String>) -> Vec<JobPost> {
     let mut handles = Vec::with_capacity(queries.len());
     let client = Client::new();
     queries.into_iter().for_each(|query| {
@@ -188,10 +197,36 @@ pub async fn scrape_queries(queries: Vec<String>) -> HashSet<XingJob> {
         .map(|job_search| job_search.items)
         .flatten()
         .collect::<HashSet<_>>();
-    results
+
+    stream::iter(results)
+        .map(|xing_job| convert_xing_job(client.clone(), xing_job))
+        .buffer_unordered(100)
+        .collect::<Vec<JobPost>>()
+        .await
 }
 
-pub async fn scrape_job_content(client: Client, job_url: &str) -> Result<String> {
+async fn convert_xing_job(client: Client, job: XingJob) -> JobPost {
+    let job_content = scrape_raw_job_content(client, &job.link).await;
+    JobPost::new(
+        job.title,
+        job.link,
+        job_analyzer::Company::new(
+            job.company.name,
+            job.company.link,
+            job.company.kununu_data.map(|kd| {
+                job_analyzer::KununuData::new(
+                    kd.company_profile_url,
+                    kd.rating_average,
+                    kd.rating_count,
+                )
+            }),
+        ),
+        job.location,
+        job_content.ok(),
+        job.activated_at,
+    )
+}
+pub async fn scrape_raw_job_content(client: Client, job_url: &str) -> Result<String> {
     let job_url = job_url;
     let html = client.get(job_url).send().await?.text().await?;
     let doc = Html::parse_document(&html);
@@ -211,8 +246,8 @@ pub async fn scrape_job_content(client: Client, job_url: &str) -> Result<String>
         .next()
         .ok_or(Error::ContentNotFound("Salary"))?
         .text();
-    let data = salary_data.chain(job_data).collect::<String>();
-    return Ok(data);
+    let raw_data = salary_data.chain(job_data).collect::<String>();
+    return Ok(raw_data);
 }
 
 // test module
@@ -228,7 +263,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_scrape_all_jobs() {
+    async fn test_scrape_with_query() {
         let query = "React Frontend Engineer";
         let _results = scrape(Client::new(), query.to_owned(), 2)
             .await
@@ -236,9 +271,17 @@ mod test {
     }
 
     #[tokio::test]
+    async fn test_scrape_queries_and_convert_to_job_posting() {
+        let queries = vec!["Svelte Engineer", "React Engineer"]
+            .into_iter()
+            .map(String::from)
+            .collect::<Vec<String>>();
+        let _results = scrape_queries(queries).await;
+    }
+    #[tokio::test]
     async fn test_parse_html_for_job_posting() {
         let job_url = "https://www.xing.com/jobs/nuernberg-anwendungsentwickler-java-98960724";
-        let data = scrape_job_content(Client::new(), job_url).await;
+        let data = scrape_raw_job_content(Client::new(), job_url).await;
         assert!(data.is_ok());
     }
 }

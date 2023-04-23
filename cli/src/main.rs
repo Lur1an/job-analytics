@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use dotenv::dotenv;
 use job_scraper::xing::scrape_queries;
 use serde_json::to_string;
-use tokio::fs::File;
+use tokio::{fs::File, io::AsyncWriteExt};
 
 /// Simple program to greet a person
 #[derive(Parser)]
@@ -21,7 +21,12 @@ enum Commands {
     Scrape {},
     Analyze {},
 }
-const DEFAULT_SEARCH_QUERIES: [&str; 8] = [
+const DEFAULT_SEARCH_QUERIES: [&str; 13] = [
+    "Spring Boot",
+    "Microservices",
+    "Python Developer",
+    "Linux Software",
+    "Linux",
     "Software Engineer",
     "Backend Software Engineer",
     "Fullstack Software Engineer",
@@ -43,8 +48,12 @@ async fn main() {
                 .into_iter()
                 .map(String::from)
                 .collect::<Vec<String>>();
-            let results = scrape_queries(queries).await;
-            let json = to_string(&results).expect("Failed to serialize results");
+            let file = File::create("xing.json")
+                .await
+                .expect("Failed to create file");
+            scrape_queries(queries, file)
+                .await
+                .expect("Failed to scrape queries");
         }
         Commands::Analyze {} => todo!(),
     };

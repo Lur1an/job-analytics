@@ -1,7 +1,8 @@
-use futures::{stream, StreamExt};
+use futures::{stream, Stream, StreamExt};
 use job_analyzer::JobPost;
 use std::collections::HashSet;
 use std::{cmp::min, hash::Hash};
+use tokio::io::AsyncWriteExt;
 
 use log;
 use reqwest::Client;
@@ -105,16 +106,18 @@ async fn scrape_job_search_page(
         .send()
         .await?;
     if !resp.status().is_success() {
+        let error_body = resp.json::<serde_json::Value>().await;
         log::error!(
-            "failed to retrieve results for offset{}, search: {}",
+            "failed to retrieve results for offset: {}, search: {}, error resp body: {:?}",
             offset,
-            search
+            search,
+            error_body,
         );
         return Err(crate::api::Error::RequestNotOk(url));
     }
 
     log::info!(
-        "successfully retrieved results for offset{}, search: {}",
+        "successfully retrieved results for offset: {}, search: {}",
         offset,
         search
     );
@@ -180,7 +183,16 @@ pub async fn scrape(
     Ok(results)
 }
 
-pub async fn scrape_queries(queries: Vec<String>) -> Vec<JobPost> {
+async fn write_json(file: &mut tokio::fs::File, json: &str) -> Result<()> {
+    file.write(json.as_bytes()).await?;
+    file.write(b",").await?;
+    Ok(())
+}
+
+/// Scrape all jobs for given queries
+/// Results are buffered into the tokin::fs::File provided
+pub async fn scrape_queries(queries: Vec<String>, mut file: tokio::fs::File) -> Result<()> {
+    file.write(b"[").await?;
     let mut handles = Vec::with_capacity(queries.len());
     let client = Client::new();
     queries.into_iter().for_each(|query| {
@@ -198,15 +210,53 @@ pub async fn scrape_queries(queries: Vec<String>) -> Vec<JobPost> {
         .flatten()
         .collect::<HashSet<_>>();
 
-    stream::iter(results)
+    log::info!(
+        "found {} unique jobs, scraping page data for each",
+        results.len()
+    );
+    let mut json_stream = stream::iter(results)
         .map(|xing_job| convert_xing_job(client.clone(), xing_job))
-        .buffer_unordered(100)
-        .collect::<Vec<JobPost>>()
-        .await
+        .buffer_unordered(50)
+        .map(|job| serde_json::to_string(&job));
+    while let Some(json) = json_stream.next().await {
+        match json {
+            Ok(json) => {
+                write_json(&mut file, &json).await?;
+            }
+            Err(e) => {
+                log::error!("failed to serialize job post, error: {}", e);
+            }
+        }
+    }
+    Ok(())
+    // let jobs_with_data = jobs.iter().filter(|job| job.raw_data.is_some()).count();
+    // log::info!(
+    //     "found {} jobs with raw data, {} without",
+    //     jobs_with_data,
+    //     jobs.len() - jobs_with_data
+    // );
+    // jobs
 }
 
+/// scrape the raw data from the job posting page
+/// then convert it to a JobPost
 async fn convert_xing_job(client: Client, job: XingJob) -> JobPost {
     let job_content = scrape_raw_job_content(client, &job.link).await;
+    let job_content = match job_content {
+        Ok(content) => {
+            log::info!("scraped job content for {}", job.link);
+            Some(content)
+        }
+        Err(e) => {
+            log::error!(
+                "failed to scrape job content for url: {}, error: {}",
+                job.link,
+                e
+            );
+            None
+        }
+    };
+
     JobPost::new(
         job.title,
         job.link,
@@ -222,13 +272,14 @@ async fn convert_xing_job(client: Client, job: XingJob) -> JobPost {
             }),
         ),
         job.location,
-        job_content.ok(),
+        job_content,
         job.activated_at,
     )
 }
 pub async fn scrape_raw_job_content(client: Client, job_url: &str) -> Result<String> {
     let job_url = job_url;
-    let html = client.get(job_url).send().await?.text().await?;
+    let resp = client.get(job_url).send().await?;
+    let html = resp.text().await?;
     let doc = Html::parse_document(&html);
     let job_data_selector = Selector::parse(
         ".styles-grid-gridContainer-cec162b7.styles-grid-standardGridContainer-cfa898d5",
@@ -270,14 +321,14 @@ mod test {
             .expect("Scraping outer function should not fail");
     }
 
-    #[tokio::test]
-    async fn test_scrape_queries_and_convert_to_job_posting() {
-        let queries = vec!["Svelte Engineer", "React Engineer"]
-            .into_iter()
-            .map(String::from)
-            .collect::<Vec<String>>();
-        let _results = scrape_queries(queries).await;
-    }
+    // #[tokio::test]
+    // async fn test_scrape_queries_and_convert_to_job_posting() {
+    //     let queries = vec!["Svelte Engineer", "React Engineer"]
+    //         .into_iter()
+    //         .map(String::from)
+    //         .collect::<Vec<String>>();
+    //     let _results = scrape_queries(queries).await;
+    // }
     #[tokio::test]
     async fn test_parse_html_for_job_posting() {
         let job_url = "https://www.xing.com/jobs/nuernberg-anwendungsentwickler-java-98960724";

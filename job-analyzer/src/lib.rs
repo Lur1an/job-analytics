@@ -99,7 +99,7 @@ pub struct JobPost {
     location: String,
     /// This data contains the raw-form of the content of the job post
     /// used by GPT endpoints to compute JobDetails. Might not be avaiable or failed to be extracted
-    raw_data: Option<String>,
+    pub raw_data: Option<String>,
     /// formatted as yyyy-mm-dd
     posting_date: Option<String>,
 }

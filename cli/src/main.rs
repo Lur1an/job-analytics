@@ -1,10 +1,14 @@
 use clap::{Parser, Subcommand};
 use dotenv::dotenv;
+use futures::{stream, StreamExt};
+use job_analyzer::{
+    db::{connect, save_job},
+    openai_analyzer::create_job,
+    JobPost, Site,
+};
 use job_scraper::xing::scrape_queries;
 use serde_json::to_string;
 use tokio::{fs::File, io::AsyncWriteExt};
-
-/// Simple program to greet a person
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
@@ -21,7 +25,22 @@ enum Commands {
     Scrape {},
     Analyze {},
 }
-const DEFAULT_SEARCH_QUERIES: [&str; 13] = [
+
+const DEFAULT_SEARCH_QUERIES: [&str; 27] = [
+    "Swift",
+    "React native",
+    "Flutter",
+    "Software Engineer",
+    "Cloud",
+    "Devops",
+    "Kubernetes",
+    "Java EE",
+    "Go Programming Language",
+    "Elixir",
+    "Kotlin",
+    "C%2B%2B",
+    "C%23",
+    "Dotnet",
     "Spring Boot",
     "Microservices",
     "Python Developer",
@@ -37,24 +56,63 @@ const DEFAULT_SEARCH_QUERIES: [&str; 13] = [
     "Python",
 ];
 
+async fn scrape(site: Site) {
+    let queries = DEFAULT_SEARCH_QUERIES
+        .into_iter()
+        .map(String::from)
+        .collect::<Vec<String>>();
+    let file = File::create("xing.json")
+        .await
+        .expect("Failed to create file");
+    scrape_queries(queries, file)
+        .await
+        .expect("Failed to scrape queries");
+}
+
+async fn analyze(site: Site) {
+    let mongodb_connection_url =
+        std::env::var("MONGODB_CONNECTION_URL").expect("MONGODB_CONNECTION_URL not set");
+    let database_name = std::env::var("DATABASE").expect("DATABASE not set");
+    let db = connect(&mongodb_connection_url, &database_name).await;
+    log::info!("Connected to database");
+
+    let filename = site.filename();
+    log::info!("Analyzing {}", filename);
+    let file = File::open(filename)
+        .await
+        .expect("Failed to open json data file");
+    let bytes = file.metadata().await.expect("Failed to get metadata").len();
+    log::info!("File size: {} bytes", bytes);
+    let data = tokio::fs::read_to_string(filename)
+        .await
+        .expect("Failed to read file");
+    let data: Vec<JobPost> = serde_json::from_str(&data).expect("Failed to parse json");
+    stream::iter(data)
+        .map(create_job)
+        .for_each(|job| {
+            let db = db.clone();
+            async move {
+                let job = job.await;
+                let job_json = to_string(&job).expect("Failed to serialize job");
+                log::info!("Saving job: {}", job_json);
+                let db_result = save_job(db, &job).await;
+                match db_result {
+                    Ok(rs) => log::info!("Saved job, id: {:?}", rs),
+                    Err(e) => log::error!("Failed to save job: {}", e),
+                }
+            }
+        })
+        .await;
+}
+
 #[tokio::main]
 async fn main() {
     dotenv().ok();
     env_logger::init();
     let args = Cli::parse();
+    let sites = args.site.iter().map(|s| Site::from(s.as_str()));
     match args.command {
-        Commands::Scrape {} => {
-            let queries = DEFAULT_SEARCH_QUERIES
-                .into_iter()
-                .map(String::from)
-                .collect::<Vec<String>>();
-            let file = File::create("xing.json")
-                .await
-                .expect("Failed to create file");
-            scrape_queries(queries, file)
-                .await
-                .expect("Failed to scrape queries");
-        }
-        Commands::Analyze {} => todo!(),
+        Commands::Scrape {} => stream::iter(sites).for_each(scrape).await,
+        Commands::Analyze {} => stream::iter(sites).for_each(analyze).await,
     };
 }

@@ -1,4 +1,4 @@
-use futures::{stream, Stream, StreamExt};
+use futures::{stream, StreamExt};
 use job_analyzer::JobPost;
 use std::collections::HashSet;
 use std::{cmp::min, hash::Hash};
@@ -33,7 +33,7 @@ struct Company {
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct XingJob {
+struct XingJob {
     id: u32,
     scrambled_id: String,
     company: Company,
@@ -76,8 +76,8 @@ struct MetaData {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct ApiResponse {
-    pub items: Vec<XingJob>,
+struct ApiResponse {
+    items: Vec<XingJob>,
     meta: MetaData,
 }
 
@@ -95,7 +95,7 @@ async fn scrape_job_search_page(
     search: &str,
 ) -> Result<ApiResponse> {
     let url = job_search_url(offset, results, search);
-    log::info!(
+    log::debug!(
         "requesting jobs from xing, offset: {}, search: {}",
         offset,
         search
@@ -106,7 +106,7 @@ async fn scrape_job_search_page(
         .send()
         .await?;
     if !resp.status().is_success() {
-        let error_body = resp.json::<serde_json::Value>().await;
+        let error_body = resp.text().await;
         log::error!(
             "failed to retrieve results for offset: {}, search: {}, error resp body: {:?}",
             offset,
@@ -116,7 +116,7 @@ async fn scrape_job_search_page(
         return Err(crate::api::Error::RequestNotOk(url));
     }
 
-    log::info!(
+    log::debug!(
         "successfully retrieved results for offset: {}, search: {}",
         offset,
         search
@@ -125,7 +125,7 @@ async fn scrape_job_search_page(
     Ok(job_search)
 }
 
-pub async fn scrape_job_search_batch(
+async fn scrape_job_search_batch(
     start: u32,
     end: u32,
     search: String,
@@ -141,11 +141,7 @@ pub async fn scrape_job_search_batch(
     results
 }
 
-pub async fn scrape(
-    client: Client,
-    keyword: String,
-    workers: u32,
-) -> Result<Vec<Result<ApiResponse>>> {
+async fn scrape(client: Client, keyword: String, workers: u32) -> Result<Vec<Result<ApiResponse>>> {
     let results_per_page = 100;
     let first_page = scrape_job_search_page(&client, 0, results_per_page, &keyword).await?;
     let results_count = min(first_page.meta.count, 1000);
@@ -183,12 +179,6 @@ pub async fn scrape(
     Ok(results)
 }
 
-async fn write_json(file: &mut tokio::fs::File, json: &str) -> Result<()> {
-    file.write(json.as_bytes()).await?;
-    file.write(b",").await?;
-    Ok(())
-}
-
 /// Scrape all jobs for given queries
 /// Results are buffered into the tokin::fs::File provided
 pub async fn scrape_queries(queries: Vec<String>, mut file: tokio::fs::File) -> Result<()> {
@@ -218,24 +208,21 @@ pub async fn scrape_queries(queries: Vec<String>, mut file: tokio::fs::File) -> 
         .map(|xing_job| convert_xing_job(client.clone(), xing_job))
         .buffer_unordered(50)
         .map(|job| serde_json::to_string(&job));
+
+    let first_job = json_stream
+        .next()
+        .await
+        .expect("Stream did not produce any results")
+        .expect("Failed serialization of first job");
+    file.write(first_job.as_bytes()).await?;
+
     while let Some(json) = json_stream.next().await {
-        match json {
-            Ok(json) => {
-                write_json(&mut file, &json).await?;
-            }
-            Err(e) => {
-                log::error!("failed to serialize job post, error: {}", e);
-            }
-        }
+        let json = json.expect("Failed serialization of job");
+        file.write(b",").await?;
+        file.write(json.as_bytes()).await?;
     }
+    file.write(b"]").await?;
     Ok(())
-    // let jobs_with_data = jobs.iter().filter(|job| job.raw_data.is_some()).count();
-    // log::info!(
-    //     "found {} jobs with raw data, {} without",
-    //     jobs_with_data,
-    //     jobs.len() - jobs_with_data
-    // );
-    // jobs
 }
 
 /// scrape the raw data from the job posting page
@@ -244,7 +231,7 @@ async fn convert_xing_job(client: Client, job: XingJob) -> JobPost {
     let job_content = scrape_raw_job_content(client, &job.link).await;
     let job_content = match job_content {
         Ok(content) => {
-            log::info!("scraped job content for {}", job.link);
+            log::debug!("scraped job content for {}", job.link);
             Some(content)
         }
         Err(e) => {
@@ -260,6 +247,7 @@ async fn convert_xing_job(client: Client, job: XingJob) -> JobPost {
     JobPost::new(
         job.title,
         job.link,
+        job_analyzer::Site::Xing,
         job_analyzer::Company::new(
             job.company.name,
             job.company.link,
@@ -276,7 +264,7 @@ async fn convert_xing_job(client: Client, job: XingJob) -> JobPost {
         job.activated_at,
     )
 }
-pub async fn scrape_raw_job_content(client: Client, job_url: &str) -> Result<String> {
+async fn scrape_raw_job_content(client: Client, job_url: &str) -> Result<String> {
     let job_url = job_url;
     let resp = client.get(job_url).send().await?;
     let html = resp.text().await?;
@@ -321,14 +309,6 @@ mod test {
             .expect("Scraping outer function should not fail");
     }
 
-    // #[tokio::test]
-    // async fn test_scrape_queries_and_convert_to_job_posting() {
-    //     let queries = vec!["Svelte Engineer", "React Engineer"]
-    //         .into_iter()
-    //         .map(String::from)
-    //         .collect::<Vec<String>>();
-    //     let _results = scrape_queries(queries).await;
-    // }
     #[tokio::test]
     async fn test_parse_html_for_job_posting() {
         let job_url = "https://www.xing.com/jobs/nuernberg-anwendungsentwickler-java-98960724";

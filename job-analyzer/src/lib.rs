@@ -1,21 +1,27 @@
 use serde::{Deserialize, Serialize};
 
 pub mod db;
+pub mod openai_analyzer;
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Debug, Serialize)]
 pub enum Site {
     Xing,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct SalaryRange {
-    min: u32,
-    max: u32,
+impl Site {
+    pub fn filename(&self) -> &'static str {
+        match self {
+            Site::Xing => "xing.json",
+        }
+    }
 }
 
-impl SalaryRange {
-    pub fn new(min: u32, max: u32) -> Self {
-        Self { min, max }
+impl From<&str> for Site {
+    fn from(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "xing" => Site::Xing,
+            _ => panic!("Unknown site"),
+        }
     }
 }
 
@@ -54,32 +60,36 @@ impl Company {
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Debug, Serialize)]
 pub enum ExperienceLevel {
-    Internship,
     Junior,
     Mid,
     Senior,
     Lead,
 }
+
 /// The details of a job post
 /// This data is extracted through ChatGPT api, by using raw job data provided
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct JobDetails {
     requirements: Vec<String>,
     technologies: Vec<String>,
+    benefits: Vec<String>,
     programming_languages: Vec<String>,
-    salary_forecast: Option<SalaryRange>,
+    salary_forecast: Option<(u32, u32)>,
     experience_level: ExperienceLevel,
+    application_url: Option<String>,
 }
 
 impl JobDetails {
     pub fn new(
         requirements: Vec<String>,
         technologies: Vec<String>,
+        benefits: Vec<String>,
         programming_languages: Vec<String>,
-        salary_forecast: Option<SalaryRange>,
+        salary_forecast: Option<(u32, u32)>,
         experience_level: ExperienceLevel,
+        application_url: Option<String>,
     ) -> Self {
         Self {
             requirements,
@@ -87,14 +97,17 @@ impl JobDetails {
             programming_languages,
             salary_forecast,
             experience_level,
+            application_url,
+            benefits,
         }
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct JobPost {
     title: String,
     link: String,
+    site: Site,
     company: Company,
     location: String,
     /// This data contains the raw-form of the content of the job post
@@ -108,6 +121,7 @@ impl JobPost {
     pub fn new(
         title: String,
         link: String,
+        site: Site,
         company: Company,
         location: String,
         raw_data: Option<String>,
@@ -116,6 +130,7 @@ impl JobPost {
         Self {
             title,
             link,
+            site,
             company,
             location,
             raw_data,

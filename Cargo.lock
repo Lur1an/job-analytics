@@ -1204,12 +1204,12 @@ checksum = "453ad9f582a441959e5f0d088b02ce04cfe8d51a8eaf077f12ac6d3e94164ca6"
 name = "job-analyzer"
 version = "0.1.0"
 dependencies = [
- "async-openai",
  "dotenv",
  "env_logger",
  "lazy_static",
  "log",
  "mongodb",
+ "openai",
  "serde",
  "serde_json",
  "thiserror",
@@ -1508,6 +1508,18 @@ name = "once_cell"
 version = "1.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b7e5500299e16ebb147ae15a00a942af264cf3688f47923b8fc2cd5858f23ad3"
+
+[[package]]
+name = "openai"
+version = "1.0.0-alpha.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ee36bba3836458bc93e5196fb3db43bff8758975d7059d259532464a33cc4d8"
+dependencies = [
+ "derive_builder",
+ "reqwest",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "openssl"

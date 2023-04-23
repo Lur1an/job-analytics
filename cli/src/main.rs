@@ -3,12 +3,13 @@ use dotenv::dotenv;
 use futures::{stream, StreamExt};
 use job_analyzer::{
     db::{connect, save_job},
-    openai_analyzer::create_job,
+    openai_analyzer::{create_job, init},
     JobPost, Site,
 };
 use job_scraper::xing::scrape_queries;
 use serde_json::to_string;
-use tokio::{fs::File, io::AsyncWriteExt};
+use tokio::fs::File;
+
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
@@ -57,19 +58,24 @@ const DEFAULT_SEARCH_QUERIES: [&str; 27] = [
 ];
 
 async fn scrape(site: Site) {
-    let queries = DEFAULT_SEARCH_QUERIES
-        .into_iter()
-        .map(String::from)
-        .collect::<Vec<String>>();
-    let file = File::create("xing.json")
-        .await
-        .expect("Failed to create file");
-    scrape_queries(queries, file)
-        .await
-        .expect("Failed to scrape queries");
+    match site {
+        Site::Xing => {
+            let queries = DEFAULT_SEARCH_QUERIES
+                .into_iter()
+                .map(String::from)
+                .collect::<Vec<String>>();
+            let file = File::create(site.filename())
+                .await
+                .expect("Failed to create file");
+            scrape_queries(queries, file)
+                .await
+                .expect("Failed to scrape queries");
+        }
+    }
 }
 
 async fn analyze(site: Site) {
+    init();
     let mongodb_connection_url =
         std::env::var("MONGODB_CONNECTION_URL").expect("MONGODB_CONNECTION_URL not set");
     let database_name = std::env::var("DATABASE").expect("DATABASE not set");
@@ -89,10 +95,10 @@ async fn analyze(site: Site) {
     let data: Vec<JobPost> = serde_json::from_str(&data).expect("Failed to parse json");
     stream::iter(data)
         .map(create_job)
+        .buffer_unordered(100)
         .for_each(|job| {
             let db = db.clone();
             async move {
-                let job = job.await;
                 let job_json = to_string(&job).expect("Failed to serialize job");
                 log::info!("Saving job: {}", job_json);
                 let db_result = save_job(db, &job).await;

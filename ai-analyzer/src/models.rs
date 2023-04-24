@@ -1,8 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-pub mod db;
-pub mod openai_analyzer;
-
 #[derive(Deserialize, Debug, Serialize)]
 pub enum Site {
     Xing,

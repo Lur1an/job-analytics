@@ -1,14 +1,17 @@
+mod analyze;
+mod scrape;
+
 use clap::{Parser, Subcommand};
 use dotenv::dotenv;
 use futures::{stream, StreamExt};
-use job_analyzer::{
+use ai_analyzer::{
     db::{connect, save_job},
     openai_analyzer::{create_job, init},
-    JobPost, Site,
 };
 use job_scraper::xing::scrape_queries;
 use serde_json::to_string;
 use tokio::fs::File;
+use ai_analyzer::models::{JobPost, Site};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -100,15 +103,16 @@ async fn analyze(site: Site) {
             let db = db.clone();
             async move {
                 let job_json = to_string(&job).expect("Failed to serialize job");
-                log::info!("Saving job: {}", job_json);
+                log::debug!("Saving job: {}", job_json);
                 let db_result = save_job(db, &job).await;
                 match db_result {
-                    Ok(rs) => log::info!("Saved job, id: {:?}", rs),
+                    Ok(rs) => log::debug!("Saved job, id: {:?}", rs),
                     Err(e) => log::error!("Failed to save job: {}", e),
                 }
             }
         })
         .await;
+    log::info!("Finished analyzing & persisting {}", filename);
 }
 
 #[tokio::main]

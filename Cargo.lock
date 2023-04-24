@@ -35,6 +35,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "ai-analyzer"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "dotenv",
+ "env_logger",
+ "lazy_static",
+ "log",
+ "mongodb",
+ "openai",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -297,11 +315,11 @@ checksum = "8a2dd5a6fe8c6e3502f568a6353e5273bbb15193ad9a89e457b9970798efbea1"
 name = "cli"
 version = "0.1.0"
 dependencies = [
+ "ai-analyzer",
  "clap",
  "dotenv",
  "env_logger",
  "futures",
- "job-analyzer",
  "job-scraper",
  "log",
  "serde",
@@ -1201,29 +1219,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "453ad9f582a441959e5f0d088b02ce04cfe8d51a8eaf077f12ac6d3e94164ca6"
 
 [[package]]
-name = "job-analyzer"
-version = "0.1.0"
-dependencies = [
- "dotenv",
- "env_logger",
- "lazy_static",
- "log",
- "mongodb",
- "openai",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
-]
-
-[[package]]
 name = "job-scraper"
 version = "0.1.0"
 dependencies = [
+ "ai-analyzer",
  "async-openai",
  "env_logger",
  "futures",
- "job-analyzer",
  "lazy_static",
  "log",
  "regex",

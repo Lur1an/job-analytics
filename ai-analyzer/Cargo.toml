@@ -1,17 +1,19 @@
 [package]
-name = "job-analyzer"
+name = "ai-analyzer"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+async-trait = "0.1.68"
 dotenv = "0.15.0"
 env_logger = "0.10.0"
 lazy_static = "1.4.0"
 log = "0.4.17"
 mongodb = "2.5.0"
 openai = "1.0.0-alpha.8"
+reqwest = "0.11.16"
 serde = { version = "1.0.160", features = ["derive"] }
 serde_json = "1.0.96"
 thiserror = "1.0.40"

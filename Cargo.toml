@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "job-analyzer",
+    "ai-analyzer",
     "job-scraper",
     "cli"
 ]

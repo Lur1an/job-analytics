@@ -11,3 +11,6 @@ pub enum Error {
     #[error("Content not found in html: '{0}'")]
     ContentNotFound(&'static str),
 }
+
+pub enum JobPost {
+}

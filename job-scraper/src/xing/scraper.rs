@@ -1,5 +1,5 @@
 use futures::{stream, StreamExt};
-use job_analyzer::JobPost;
+use ai_analyzer::models::JobPost;
 use std::collections::HashSet;
 use std::{cmp::min, hash::Hash};
 use tokio::io::AsyncWriteExt;
@@ -33,7 +33,7 @@ struct Company {
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
-struct XingJob {
+struct Job {
     id: u32,
     scrambled_id: String,
     company: Company,
@@ -52,16 +52,17 @@ struct XingJob {
     tracking_token: Option<String>,
 }
 
-impl PartialEq for XingJob {
+impl PartialEq for Job {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
     }
 }
-impl Eq for XingJob {}
-impl Hash for XingJob {
+impl Eq for Job {
+}
+impl Hash for Job {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.id.hash(state);
-        self.scrambled_id.hash(state);
+        "xing".hash(state);
     }
 }
 
@@ -77,7 +78,7 @@ struct MetaData {
 
 #[derive(Serialize, Deserialize, Debug)]
 struct ApiResponse {
-    items: Vec<XingJob>,
+    items: Vec<Job>,
     meta: MetaData,
 }
 
@@ -227,7 +228,7 @@ pub async fn scrape_queries(queries: Vec<String>, mut file: tokio::fs::File) -> 
 
 /// scrape the raw data from the job posting page
 /// then convert it to a JobPost
-async fn convert_xing_job(client: Client, job: XingJob) -> JobPost {
+async fn convert_xing_job(client: Client, job: Job) -> JobPost {
     let job_content = scrape_raw_job_content(client, &job.link).await;
     let job_content = match job_content {
         Ok(content) => {
@@ -247,12 +248,12 @@ async fn convert_xing_job(client: Client, job: XingJob) -> JobPost {
     JobPost::new(
         job.title,
         job.link,
-        job_analyzer::Site::Xing,
-        job_analyzer::Company::new(
+        ai_analyzer::models::Site::Xing,
+        ai_analyzer::models::Company::new(
             job.company.name,
             job.company.link,
             job.company.kununu_data.map(|kd| {
-                job_analyzer::KununuData::new(
+                ai_analyzer::models::KununuData::new(
                     kd.company_profile_url,
                     kd.rating_average,
                     kd.rating_count,

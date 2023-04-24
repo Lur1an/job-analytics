@@ -1,9 +1,9 @@
-use crate::{JobDetails, JobPost};
 use mongodb::{
     bson::oid::ObjectId,
     results::{InsertManyResult, InsertOneResult},
 };
 use serde::{Deserialize, Serialize};
+use crate::models::{JobDetails, JobPost};
 
 #[derive(Deserialize, Serialize)]
 pub struct Job {

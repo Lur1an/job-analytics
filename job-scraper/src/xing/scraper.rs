@@ -221,11 +221,11 @@ async fn scrape_raw_job_content(client: Client, job_url: &str) -> Result<String>
 // test module
 #[cfg(test)]
 mod test {
+    use tokio::pin;
     use super::* ;
 
     #[tokio::test]
     async fn test_get_and_deserialize_job_search() {
-        env_logger::init();
         let _ = scrape_job_search_page(&Client::new(), 0, 100, "Software")
             .await
             .expect("Request failed");
@@ -233,7 +233,6 @@ mod test {
 
     #[tokio::test]
     async fn test_scrape_with_query() {
-        env_logger::init();
         let query = "React Frontend Engineer";
         let results = scrape_api(Client::new(), query.to_owned(), 2)
             .await;
@@ -249,7 +248,8 @@ mod test {
             "Rust".to_owned(),
         ];
         let stream = scrape_queries(queries).await.buffer_unordered(200);
-        tokio::pin!(stream);
+        log::info!("stream size hint: {:?}", stream.size_hint());
+        pin!(stream);
         let mut job_count = 0;
         while let Some(job) = stream.next().await {
             job_count += 1;
@@ -259,7 +259,6 @@ mod test {
 
     #[tokio::test]
     async fn test_parse_html_for_job_posting() {
-        env_logger::init();
         let job_url = "https://www.xing.com/jobs/nuernberg-anwendungsentwickler-java-98960724";
         let data = scrape_raw_job_content(Client::new(), job_url).await;
         assert!(data.is_ok(), "Failed to parse html");

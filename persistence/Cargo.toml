@@ -1,0 +1,12 @@
+[package]
+name = "job-analytics"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+mongodb = "2.5.0"
+job-scraper = { path = "../job-scraper" }
+ai-analyzer = { path = "../ai-analyzer" }
+serde = { version = "1.0.160", features = ["derive"] }

@@ -1,12 +1,12 @@
-use futures::{FutureExt, stream, Stream, StreamExt};
-use std::collections::HashSet;
-use std::{cmp::min, hash::Hash};
-use std::collections::hash_set::IntoIter;
-use std::future::Future;
-use std::hash::Hasher;
-use std::pin::Pin;
 use async_stream::stream;
 use futures::stream::{Iter, Map};
+use futures::{stream, FutureExt, Stream, StreamExt};
+use std::cmp::min;
+use std::collections::HashSet;
+use std::hash::Hash;
+use std::hash::Hasher;
+use std::pin::Pin;
+use std::{collections::hash_set::IntoIter, future::Future};
 use tokio::io::AsyncWriteExt;
 
 use log;
@@ -17,10 +17,9 @@ use scraper::Node::Text;
 use scraper::Selector;
 use serde::{Deserialize, Serialize};
 
+use crate::xing::types::Job;
 use crate::xing::Error;
 use crate::xing::Result;
-use crate::xing::types::Job;
-
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -98,7 +97,11 @@ async fn scrape_job_search_batch(
     results
 }
 
-async fn scrape_api(client: Client, keyword: String, workers: u32) -> Result<Vec<Result<ApiResponse>>> {
+async fn scrape_api(
+    client: Client,
+    keyword: String,
+    workers: u32,
+) -> Result<Vec<Result<ApiResponse>>> {
     let results_per_page = 100;
     let first_page = scrape_job_search_page(&client, 0, results_per_page, &keyword).await?;
     let results_count = min(first_page.meta.count, 1000);
@@ -138,7 +141,9 @@ async fn scrape_api(client: Client, keyword: String, workers: u32) -> Result<Vec
 
 /// Scrape all jobs for given queries
 /// Results are buffered into the tokin::fs::File provided
-pub async fn scrape_queries(queries: Vec<String>) -> impl Stream<Item=impl Future<Output=crate::Job>> {
+pub async fn scrape_queries(
+    queries: Vec<String>,
+) -> impl Stream<Item = impl Future<Output = crate::Job>> {
     let mut handles = Vec::with_capacity(queries.len());
     let client = Client::new();
     queries.into_iter().for_each(|query| {
@@ -148,21 +153,21 @@ pub async fn scrape_queries(queries: Vec<String>) -> impl Stream<Item=impl Futur
     let results = futures::future::join_all(handles)
         .await
         .into_iter()
-        .filter_map(|x| x.ok())
-        .filter_map(|x| x.ok())
+        .filter_map(std::result::Result::ok)
+        .filter_map(Result::ok)
         .flatten()
         .filter_map(Result::ok)
-        .map(|job_search| job_search.items)
-        .flatten()
+        .flat_map(|job_search| job_search.items)
         .collect::<HashSet<_>>();
 
     log::info!(
         "found {} unique jobs, scraping page data for each",
         results.len()
     );
+
     let job_stream = stream! {
         for job in results {
-            let job = convert_xing_job(client.clone(), job);
+            let job = convert(client.clone(), job);
             yield job;
         }
     };
@@ -171,8 +176,8 @@ pub async fn scrape_queries(queries: Vec<String>) -> impl Stream<Item=impl Futur
 
 /// scrape the raw data from the job posting page
 /// then convert it to a JobPost
-async fn convert_xing_job(client: Client, job: Job) -> crate::Job {
-    let job_content = scrape_raw_job_content(client, &job.link).await;
+async fn convert(client: Client, job: Job) -> crate::Job {
+    let job_content = scrape_job_content(client, &job.link).await;
     let job_content = match job_content {
         Ok(content) => {
             log::debug!("scraped job content for {}", job.link);
@@ -193,7 +198,7 @@ async fn convert_xing_job(client: Client, job: Job) -> crate::Job {
     }
 }
 
-async fn scrape_raw_job_content(client: Client, job_url: &str) -> Result<String> {
+async fn scrape_job_content(client: Client, job_url: &str) -> Result<String> {
     let job_url = job_url;
     let resp = client.get(job_url).send().await?;
     let html = resp.text().await?;
@@ -201,7 +206,7 @@ async fn scrape_raw_job_content(client: Client, job_url: &str) -> Result<String>
     let job_data_selector = Selector::parse(
         ".styles-grid-gridContainer-cec162b7.styles-grid-standardGridContainer-cfa898d5",
     )
-        .unwrap();
+    .unwrap();
     let job_data = doc
         .select(&job_data_selector)
         .next()
@@ -221,8 +226,9 @@ async fn scrape_raw_job_content(client: Client, job_url: &str) -> Result<String>
 // test module
 #[cfg(test)]
 mod test {
+    use super::*;
     use tokio::pin;
-    use super::* ;
+    use tokio::time::Instant;
 
     #[tokio::test]
     async fn test_get_and_deserialize_job_search() {
@@ -234,33 +240,63 @@ mod test {
     #[tokio::test]
     async fn test_scrape_with_query() {
         let query = "React Frontend Engineer";
-        let results = scrape_api(Client::new(), query.to_owned(), 2)
-            .await;
+        let results = scrape_api(Client::new(), query.to_owned(), 2).await;
         assert!(results.is_ok(), "Failed to scrape with query: {}", query);
     }
-
 
     #[tokio::test]
     async fn test_scrape_stream_api() {
         env_logger::init();
-        let queries = vec![
-            "Svelte".to_owned(),
-            "Rust".to_owned(),
-        ];
-        let stream = scrape_queries(queries).await.buffer_unordered(200);
+        let queries = vec!["Svelte".to_owned(), "Rust".to_owned()];
+        let stream = scrape_queries(queries).await.buffer_unordered(400);
         log::info!("stream size hint: {:?}", stream.size_hint());
         pin!(stream);
         let mut job_count = 0;
+        let t1 = Instant::now();
         while let Some(job) = stream.next().await {
             job_count += 1;
         }
+        let t2 = Instant::now();
+        log::info!("Streamed jobs in {:?}", t2 - t1);
         assert!(job_count > 0, "Failed to scrape any jobs");
+    }
+
+    #[tokio::test]
+    async fn benchmark() {
+        env_logger::init();
+        let queries = vec!["Svelte".to_owned(), "Rust".to_owned()];
+        let mut handles = Vec::with_capacity(queries.len());
+        let client = Client::new();
+        queries.into_iter().for_each(|query| {
+            let join_handle = tokio::spawn(scrape_api(client.clone(), query, 2));
+            handles.push(join_handle);
+        });
+        let results = futures::future::join_all(handles)
+            .await
+            .into_iter()
+            .filter_map(|x| x.ok())
+            .filter_map(|x| x.ok())
+            .flatten()
+            .filter_map(Result::ok)
+            .map(|job_search| job_search.items)
+            .flatten()
+            .collect::<HashSet<_>>();
+
+        let t1 = Instant::now();
+        let jobs = stream::iter(results)
+            .map(|job| convert(client.clone(), job))
+            .buffer_unordered(200)
+            .collect::<Vec<_>>()
+            .await;
+        let t2 = Instant::now();
+        log::info!("Collected jobs in {:?}", t2 - t1);
+        ()
     }
 
     #[tokio::test]
     async fn test_parse_html_for_job_posting() {
         let job_url = "https://www.xing.com/jobs/nuernberg-anwendungsentwickler-java-98960724";
-        let data = scrape_raw_job_content(Client::new(), job_url).await;
+        let data = scrape_job_content(Client::new(), job_url).await;
         assert!(data.is_ok(), "Failed to parse html");
     }
 }

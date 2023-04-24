@@ -344,6 +344,7 @@ dependencies = [
  "futures",
  "job-scraper",
  "log",
+ "persistence",
  "serde",
  "serde_json",
  "tokio",
@@ -1241,16 +1242,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "453ad9f582a441959e5f0d088b02ce04cfe8d51a8eaf077f12ac6d3e94164ca6"
 
 [[package]]
-name = "job-analytics"
-version = "0.1.0"
-dependencies = [
- "ai-analyzer",
- "job-scraper",
- "mongodb",
- "serde",
-]
-
-[[package]]
 name = "job-scraper"
 version = "0.1.0"
 dependencies = [
@@ -1637,6 +1628,16 @@ name = "percent-encoding"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "478c572c3d73181ff3c2539045f6eb99e5491218eae919370993b890cdbdd98e"
+
+[[package]]
+name = "persistence"
+version = "0.1.0"
+dependencies = [
+ "ai-analyzer",
+ "job-scraper",
+ "mongodb",
+ "serde",
+]
 
 [[package]]
 name = "phf"

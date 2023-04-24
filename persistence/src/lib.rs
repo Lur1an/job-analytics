@@ -1,5 +1,6 @@
+use ai_analyzer::types::JobDetails;
 use mongodb::bson::oid::ObjectId;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct ScrapedJob {
@@ -8,11 +9,18 @@ pub struct ScrapedJob {
     job: job_scraper::Job,
 }
 
+impl ScrapedJob {
+    pub fn new(job: job_scraper::Job) -> Self {
+        Self { id: None, job }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct Job {
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
     id: Option<ObjectId>,
     /// a hash generated with site-specific data to help recognize duplicates
-    job_details: ai_analyzer::types::JobDetails,
+    job_details: JobDetails,
     title: String,
     link: String,
     site_hash: u64,

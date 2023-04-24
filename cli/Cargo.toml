@@ -13,6 +13,7 @@ serde_json = "1.0.96"
 job-scraper = {path = "../job-scraper"}
 futures = "0.3.28"
 ai-analyzer = {path = "../ai-analyzer" }
+persistence = {path = "../persistence" }
 dotenv = "0.15.0"
 tokio = { version = "1.27.0", features = ["full"] }
 log = "0.4.17"

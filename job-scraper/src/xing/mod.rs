@@ -1,5 +1,5 @@
+pub mod scraper;
 pub(crate) mod types;
-mod scraper;
 
 use thiserror::Error;
 
@@ -15,6 +15,3 @@ pub enum Error {
     #[error("Content not found in html: '{0}'")]
     ContentNotFound(&'static str),
 }
-
-
-

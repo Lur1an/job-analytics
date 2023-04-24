@@ -4,20 +4,25 @@ mod scrape;
 use clap::{Parser, Subcommand};
 use dotenv::dotenv;
 use futures::{stream, StreamExt};
-use ai_analyzer::{
-    db::{connect, save_job},
-    openai_analyzer::{create_job, init},
-};
-use job_scraper::xing::scrape_queries;
-use serde_json::to_string;
-use tokio::fs::File;
-use ai_analyzer::types::{JobPost, Site};
 
-enum Target {
+#[derive(Clone)]
+pub enum Target {
     Xing,
     Linkedin,
     Stepstone,
     Glassdoor,
+}
+
+impl From<String> for Target {
+    fn from(s: String) -> Self {
+        match s.to_lowercase().as_str() {
+            "xing" => Target::Xing,
+            "linkedin" => Target::Linkedin,
+            "stepstone" => Target::Stepstone,
+            "glassdoor" => Target::Glassdoor,
+            _ => panic!("Unknown target: {}", s),
+        }
+    }
 }
 
 #[derive(Parser)]
@@ -25,7 +30,7 @@ enum Target {
 struct Cli {
     /// List of job-providers to execute the command against
     #[clap(long)]
-    site: Vec<Target>,
+    site: Vec<String>,
 
     #[command(subcommand)]
     command: Commands,
@@ -42,8 +47,9 @@ async fn main() {
     dotenv().ok();
     env_logger::init();
     let args = Cli::parse();
+    let sites = args.site.into_iter().map(Target::from);
     match args.command {
-        Commands::Scrape {} => stream::iter(args.site).for_each(scrape::scrape).await,
-        Commands::Analyze {} => stream::iter(args.site).for_each(analyze::analyze).await,
+        Commands::Scrape {} => stream::iter(sites).for_each(scrape::scrape).await,
+        Commands::Analyze {} => stream::iter(sites).for_each(analyze::analyze).await,
     };
 }

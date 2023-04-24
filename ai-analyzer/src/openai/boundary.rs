@@ -1,10 +1,7 @@
-use crate::api::DataExtractor;
-use crate::models::JobDetails;
-use crate::openai::api::Client;
-use crate::openai::api::Error;
-use crate::openai::api::Result;
+use crate::types::JobDetails;
 use async_trait::async_trait;
-
+use crate::DataExtractor;
+use crate::openai::{Client, Error, Result};
 
 const PROMPT_BASE: &str = r#"
 Your task is to analyze data about job postings.
@@ -49,10 +46,19 @@ impl Client {
     }
 }
 
+impl Default for Client {
+    /// Fetches api key from env var OPENAI_API_KEY, panics if not set
+    fn default() -> Self {
+        let api_key = std::env::var("OPENAI_API_KEY").unwrap_or_default();
+        Self::new(api_key)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
     use std::env;
+
     #[tokio::test]
     async fn test_extract() {
         dotenv::dotenv().ok();

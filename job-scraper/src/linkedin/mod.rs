@@ -1,4 +1,6 @@
-use futures::{stream, Stream, StreamExt};
+use std::{collections::HashSet, iter::Flatten};
+
+use futures::{stream, Future, Stream, StreamExt};
 use lazy_static::lazy_static;
 use regex::Regex;
 use reqwest::Client;
@@ -64,16 +66,32 @@ async fn scrape_job_ids(
     }
 }
 
-pub async fn scrape(queries: Vec<String>, locations: Vec<String>) {
+pub async fn scrape_job(client: Client, id: String) -> Option<crate::Job> {
+    todo!()
+}
+
+pub async fn scrape(
+    queries: Vec<String>,
+    locations: Vec<String>,
+) -> impl Stream<Item = impl Future<Output = Option<crate::Job>>> {
     let client = Client::new();
-    let product = queries.into_iter().flat_map(|query| {
+    let product = queries.iter().flat_map(|query| {
         locations
             .iter()
-            .map(move |location| (query, location.to_owned()))
+            .map(move |location| (query.to_owned(), location.to_owned()))
     });
-    // let mut id_stream =
-    //     stream::iter(product).map(|(query, location)| scrape_job_ids(client, query, location));
-    todo!()
+    let id_stream = stream::iter(product)
+        .map(|(query, location)| scrape_job_ids(client.clone(), query, location))
+        .buffer_unordered(20)
+        .flatten()
+        .collect::<Vec<_>>()
+        .await;
+    log::info!(
+        "Found {} unique job ids, creating output stream of scraped jobs",
+        id_stream.len()
+    );
+    let ids = id_stream.into_iter().flatten().collect::<HashSet<String>>();
+    stream::iter(ids).map(move |job_id| scrape_job(client.clone(), job_id))
 }
 
 #[cfg(test)]

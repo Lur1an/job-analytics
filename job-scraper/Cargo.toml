@@ -21,3 +21,5 @@ thiserror = "1.0.40"
 tokio = { version="1.27.0", features=["full"] }
 ai-analyzer = {path = "../ai-analyzer" }
 async-stream = "0.3.5"
+chrono = "0.4.24"
+urlencoding = "2.1.2"

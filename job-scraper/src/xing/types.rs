@@ -1,5 +1,6 @@
-use std::hash::{Hash, Hasher};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use std::hash::{Hash, Hasher};
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -31,7 +32,7 @@ pub struct Job {
     location: String,
     position: u32,
     thumbnail: Option<String>,
-    activated_at: Option<String>,
+    activated_at: Option<chrono::DateTime<Utc>>,
     path: Option<String>,
     slug: Option<String>,
     title: String,

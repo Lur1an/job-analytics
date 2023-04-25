@@ -1,19 +1,13 @@
 use async_stream::stream;
-use futures::stream::{Iter, Map};
-use futures::{stream, FutureExt, Stream, StreamExt};
+use futures::Stream;
 use std::cmp::min;
 use std::collections::HashSet;
-use std::hash::Hash;
-use std::hash::Hasher;
-use std::pin::Pin;
-use std::{collections::hash_set::IntoIter, future::Future};
-use tokio::io::AsyncWriteExt;
+use std::future::Future;
 
 use log;
 use reqwest::Client;
 
 use scraper::Html;
-use scraper::Node::Text;
 use scraper::Selector;
 use serde::{Deserialize, Serialize};
 
@@ -118,7 +112,7 @@ async fn scrape_api(
         let start = pages_per_worker * w + 1;
         let mut end = start + pages_per_worker;
         if w == workers - 1 && remainder > 0 {
-            end += remainder - 1;
+            end = end - 1 + remainder;
         }
         let handle = tokio::spawn(scrape_job_search_batch(
             start,
@@ -227,6 +221,7 @@ async fn scrape_job_content(client: Client, job_url: &str) -> Result<String> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use futures::{stream, StreamExt};
     use tokio::pin;
     use tokio::time::Instant;
 
@@ -252,45 +247,10 @@ mod test {
         log::info!("stream size hint: {:?}", stream.size_hint());
         pin!(stream);
         let mut job_count = 0;
-        let t1 = Instant::now();
-        while let Some(job) = stream.next().await {
+        while let Some(_) = stream.next().await {
             job_count += 1;
         }
-        let t2 = Instant::now();
-        log::info!("Streamed jobs in {:?}", t2 - t1);
         assert!(job_count > 0, "Failed to scrape any jobs");
-    }
-
-    #[tokio::test]
-    async fn benchmark() {
-        env_logger::init();
-        let queries = vec!["Svelte".to_owned(), "Rust".to_owned()];
-        let mut handles = Vec::with_capacity(queries.len());
-        let client = Client::new();
-        queries.into_iter().for_each(|query| {
-            let join_handle = tokio::spawn(scrape_api(client.clone(), query, 2));
-            handles.push(join_handle);
-        });
-        let results = futures::future::join_all(handles)
-            .await
-            .into_iter()
-            .filter_map(|x| x.ok())
-            .filter_map(|x| x.ok())
-            .flatten()
-            .filter_map(Result::ok)
-            .map(|job_search| job_search.items)
-            .flatten()
-            .collect::<HashSet<_>>();
-
-        let t1 = Instant::now();
-        let jobs = stream::iter(results)
-            .map(|job| convert(client.clone(), job))
-            .buffer_unordered(200)
-            .collect::<Vec<_>>()
-            .await;
-        let t2 = Instant::now();
-        log::info!("Collected jobs in {:?}", t2 - t1);
-        ()
     }
 
     #[tokio::test]

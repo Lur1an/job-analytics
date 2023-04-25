@@ -1,3 +1,8 @@
+use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+};
+
 use ai_analyzer::types::JobDetails;
 use mongodb::bson::oid::ObjectId;
 use serde::{Deserialize, Serialize};
@@ -7,11 +12,18 @@ pub struct ScrapedJob {
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
     id: Option<ObjectId>,
     job: job_scraper::Job,
+    site_hash: String,
 }
 
 impl ScrapedJob {
     pub fn new(job: job_scraper::Job) -> Self {
-        Self { id: None, job }
+        let mut state = DefaultHasher::new();
+        job.hash(&mut state);
+        Self {
+            id: None,
+            job,
+            site_hash: state.finish().to_string(),
+        }
     }
 }
 
@@ -23,7 +35,7 @@ pub struct Job {
     job_details: JobDetails,
     title: String,
     link: String,
-    site_hash: u64,
+    site_hash: String,
 }
 
 pub async fn connect(mongodb_connection_url: &str, database_name: &str) -> mongodb::Database {

@@ -17,5 +17,6 @@ persistence = {path = "../persistence" }
 dotenv = "0.15.0"
 tokio = { version = "1.27.0", features = ["full"] }
 log = "0.4.17"
+mongodb = "2.5.0"
 
 

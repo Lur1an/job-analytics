@@ -18,11 +18,11 @@ struct Filter {
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct JobEntry {
+pub struct Job {
     favorite: bool,
     seen: bool,
     hidden: bool,
-    pub job: Job,
+    pub job: JobData,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -50,7 +50,7 @@ struct Skill {
 }
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Job {
+pub struct JobData {
     pub(crate) uuid: String,
     name: String,
     languages: Vec<Language>,
@@ -91,7 +91,7 @@ struct Meta {
 #[derive(Debug, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct ResponseBody {
-    job_suggestions: Vec<JobEntry>,
+    job_suggestions: Vec<Job>,
     meta: Meta,
 }
 
@@ -165,7 +165,7 @@ pub async fn scrape(session_cookie_value: String) -> impl Stream<Item = crate::J
             search_after = Some(resp_body.meta.search_after);
             for job_entry in resp_body.job_suggestions {
                 yield crate::Job::Instaffo {
-                    job_entry: Box::new(job_entry),
+                    job: Box::new(job_entry),
                 };
             }
             log::info!("Successfully yielded all jobs from request, starting next loop iteration with pit_id: {:?}, search_after: {:?}", pit_id, search_after);

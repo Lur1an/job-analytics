@@ -1,0 +1,2 @@
+https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?location=Germany&start=0 -> to get jobs on board html
+https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/3586415780 -> to see job-specific html

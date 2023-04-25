@@ -1,7 +1,29 @@
 use crate::Target;
-use futures::StreamExt;
-use persistence::save_many;
+use futures::{
+    stream::{BufferUnordered, Chunks},
+    Future, Stream, StreamExt,
+};
+use job_scraper::Job;
+use persistence::{save_many, ScrapedJob};
 use tokio::fs::File;
+
+async fn save_job_stream(
+    stream: Chunks<impl Stream<Item = Job>>,
+    collection: mongodb::Collection<persistence::ScrapedJob>,
+) {
+    tokio::pin!(stream);
+    while let Some(result_chunk) = stream.next().await {
+        let scraped_jobs = result_chunk
+            .into_iter()
+            .map(|job| persistence::ScrapedJob::new(job));
+        match save_many(&collection, scraped_jobs).await {
+            Ok(insert_result) => {
+                log::info!("Inserted {} jobs", insert_result.inserted_ids.len())
+            }
+            Err(e) => log::error!("Error inserting scraped jobs: {}", e),
+        }
+    }
+}
 
 pub async fn scrape(site: Target) {
     let mongodb_connection_url =
@@ -19,18 +41,7 @@ pub async fn scrape(site: Target) {
                 .await
                 .buffer_unordered(500)
                 .chunks(500);
-            tokio::pin!(results);
-            while let Some(result_chunk) = results.next().await {
-                let scraped_jobs = result_chunk
-                    .into_iter()
-                    .map(|job| persistence::ScrapedJob::new(job));
-                match save_many(&collection, scraped_jobs).await {
-                    Ok(insert_result) => {
-                        log::info!("Inserted {} jobs", insert_result.inserted_ids.len())
-                    }
-                    Err(e) => log::error!("Error inserting scraped jobs: {}", e),
-                }
-            }
+            save_job_stream(results, collection).await;
         }
         Target::Instaffo => {
             println!("Please enter your session cookie:");
@@ -42,19 +53,9 @@ pub async fn scrape(site: Target) {
             let results = job_scraper::instaffo::scrape(session_cookie.into())
                 .await
                 .chunks(20);
-            tokio::pin!(results);
-            while let Some(result_chunk) = results.next().await {
-                let scraped_jobs = result_chunk
-                    .into_iter()
-                    .map(|job| persistence::ScrapedJob::new(job));
-                match save_many(&collection, scraped_jobs).await {
-                    Ok(insert_result) => {
-                        log::info!("Inserted {} jobs", insert_result.inserted_ids.len())
-                    }
-                    Err(e) => log::error!("Error inserting scraped jobs: {}", e),
-                }
-            }
+            save_job_stream(results, collection).await;
         }
+        Target::Linkedin => {}
         _ => {}
     }
 }

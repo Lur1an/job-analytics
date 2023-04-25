@@ -14,11 +14,12 @@ pub enum Job {
         raw_data: Option<String>,
     },
     Instaffo {
-        job_entry: Box<instaffo::JobEntry>,
+        job: Box<instaffo::Job>,
     },
     Linkedin {},
     Stepstone {},
     Glassdoor {},
+    Indeed {},
 }
 
 impl Hash for Job {
@@ -30,7 +31,8 @@ impl Hash for Job {
             Job::Linkedin {} => todo!(),
             Job::Stepstone {} => todo!(),
             Job::Glassdoor {} => todo!(),
-            Job::Instaffo { job_entry } => {
+            Job::Indeed {} => todo!(),
+            Job::Instaffo { job: job_entry } => {
                 job_entry.job.uuid.hash(state);
                 "instaffo".hash(state);
             }

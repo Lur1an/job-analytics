@@ -345,6 +345,7 @@ dependencies = [
  "futures",
  "job-scraper",
  "log",
+ "mongodb",
  "persistence",
  "serde",
  "serde_json",

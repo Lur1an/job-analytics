@@ -33,6 +33,7 @@ pub struct Job {
     id: Option<ObjectId>,
     /// a hash generated with site-specific data to help recognize duplicates
     job_details: JobDetails,
+    private: bool,
     title: String,
     link: Option<String>,
     site_hash: String,

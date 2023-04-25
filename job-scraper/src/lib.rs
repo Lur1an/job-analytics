@@ -1,5 +1,6 @@
 pub(crate) mod cookies;
 pub mod instaffo;
+pub mod linkedin;
 pub mod xing;
 
 use serde::{Deserialize, Serialize};

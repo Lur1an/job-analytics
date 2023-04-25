@@ -1,5 +1,6 @@
 use crate::Target;
 use futures::StreamExt;
+use persistence::save_many;
 use tokio::fs::File;
 
 pub async fn scrape(site: Target) {
@@ -23,9 +24,32 @@ pub async fn scrape(site: Target) {
                 let scraped_jobs = result_chunk
                     .into_iter()
                     .map(|job| persistence::ScrapedJob::new(job));
-                match collection.insert_many(scraped_jobs, None).await {
+                match save_many(&collection, scraped_jobs).await {
                     Ok(insert_result) => {
-                        log::info!("Inserted {} scraped jobs", insert_result.inserted_ids.len())
+                        log::info!("Inserted {} jobs", insert_result.inserted_ids.len())
+                    }
+                    Err(e) => log::error!("Error inserting scraped jobs: {}", e),
+                }
+            }
+        }
+        Target::Instaffo => {
+            println!("Please enter your session cookie:");
+            let mut session_cookie = String::new();
+            std::io::stdin()
+                .read_line(&mut session_cookie)
+                .expect("Failed to read line");
+            let session_cookie = session_cookie.trim();
+            let results = job_scraper::instaffo::scrape(session_cookie.into())
+                .await
+                .chunks(20);
+            tokio::pin!(results);
+            while let Some(result_chunk) = results.next().await {
+                let scraped_jobs = result_chunk
+                    .into_iter()
+                    .map(|job| persistence::ScrapedJob::new(job));
+                match save_many(&collection, scraped_jobs).await {
+                    Ok(insert_result) => {
+                        log::info!("Inserted {} jobs", insert_result.inserted_ids.len())
                     }
                     Err(e) => log::error!("Error inserting scraped jobs: {}", e),
                 }

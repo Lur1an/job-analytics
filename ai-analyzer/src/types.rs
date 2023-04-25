@@ -23,6 +23,7 @@ pub struct JobDetails {
     benefits: Vec<String>,
     programming_languages: Vec<String>,
     salary_forecast: Option<(u32, u32)>,
+    requires_degree: Option<String>,
     experience_level: Option<ExperienceLevel>,
     application_url: Option<String>,
     workplace: Option<Workplace>,
@@ -35,6 +36,7 @@ impl JobDetails {
         benefits: Vec<String>,
         programming_languages: Vec<String>,
         salary_forecast: Option<(u32, u32)>,
+        requires_degree: Option<String>,
         experience_level: Option<ExperienceLevel>,
         application_url: Option<String>,
         workplace: Option<Workplace>,
@@ -48,7 +50,7 @@ impl JobDetails {
             application_url,
             benefits,
             workplace,
+            requires_degree,
         }
     }
 }
-

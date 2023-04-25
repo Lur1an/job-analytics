@@ -12,6 +12,9 @@ pub enum Job {
         job: Box<xing::types::Job>,
         raw_data: Option<String>,
     },
+    Instaffo {
+        job_entry: Box<instaffo::JobEntry>,
+    },
     Linkedin {},
     Stepstone {},
     Glassdoor {},
@@ -26,6 +29,10 @@ impl Hash for Job {
             Job::Linkedin {} => todo!(),
             Job::Stepstone {} => todo!(),
             Job::Glassdoor {} => todo!(),
+            Job::Instaffo { job_entry } => {
+                job_entry.job.uuid.hash(state);
+                "instaffo".hash(state);
+            }
         }
     }
 }

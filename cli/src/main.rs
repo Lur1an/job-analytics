@@ -11,6 +11,7 @@ pub enum Target {
     Linkedin,
     Stepstone,
     Glassdoor,
+    Instaffo,
 }
 
 impl From<String> for Target {
@@ -20,6 +21,7 @@ impl From<String> for Target {
             "linkedin" => Target::Linkedin,
             "stepstone" => Target::Stepstone,
             "glassdoor" => Target::Glassdoor,
+            "instaffo" => Target::Instaffo,
             _ => panic!("Unknown target: {}", s),
         }
     }

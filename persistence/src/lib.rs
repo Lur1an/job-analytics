@@ -1,11 +1,11 @@
+use ai_analyzer::types::JobDetails;
+use async_trait::async_trait;
+use mongodb::{bson::oid::ObjectId, results::InsertManyResult};
+use serde::{Deserialize, Serialize};
 use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
 };
-
-use ai_analyzer::types::JobDetails;
-use mongodb::bson::oid::ObjectId;
-use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct ScrapedJob {
@@ -34,7 +34,7 @@ pub struct Job {
     /// a hash generated with site-specific data to help recognize duplicates
     job_details: JobDetails,
     title: String,
-    link: String,
+    link: Option<String>,
     site_hash: String,
 }
 
@@ -43,6 +43,20 @@ pub async fn connect(mongodb_connection_url: &str, database_name: &str) -> mongo
         .await
         .expect("Incorrect mongodb connection url");
     client.database(database_name)
+}
+
+/// Saves multiple documents, ignoring duplicate key errors
+pub async fn save_many<T>(
+    col: &mongodb::Collection<T>,
+    docs: impl Iterator<Item = T>,
+) -> Result<InsertManyResult, mongodb::error::Error>
+where
+    T: Serialize,
+{
+    let options = mongodb::options::InsertManyOptions::builder()
+        .ordered(false)
+        .build();
+    col.insert_many(docs, options).await
 }
 
 #[cfg(test)]

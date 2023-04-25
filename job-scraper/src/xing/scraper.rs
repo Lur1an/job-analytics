@@ -244,7 +244,6 @@ mod test {
         env_logger::init();
         let queries = vec!["Svelte".to_owned(), "Rust".to_owned()];
         let stream = scrape_queries(queries).await.buffer_unordered(400);
-        log::info!("stream size hint: {:?}", stream.size_hint());
         pin!(stream);
         let mut job_count = 0;
         while let Some(_) = stream.next().await {

@@ -1637,7 +1637,9 @@ name = "persistence"
 version = "0.1.0"
 dependencies = [
  "ai-analyzer",
+ "async-trait",
  "job-scraper",
+ "log",
  "mongodb",
  "serde",
 ]

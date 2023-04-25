@@ -10,3 +10,5 @@ mongodb = { version = "2.5.0", features=["bson-chrono-0_4"] }
 job-scraper = { path = "../job-scraper" }
 ai-analyzer = { path = "../ai-analyzer" }
 serde = { version = "1.0.160", features = ["derive"] }
+log = "0.4.17"
+async-trait = "0.1.68"

@@ -1,4 +1,4 @@
-fn encode_cookies<I>(pairs: I) -> String
+pub(crate) fn encode_cookies<I>(pairs: I) -> String
 where
     I: Iterator<Item = (String, String)>,
 {

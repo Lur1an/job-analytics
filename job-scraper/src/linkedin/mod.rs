@@ -1,5 +1,6 @@
 use std::{collections::HashSet, iter::Flatten};
 
+use chrono::{Duration, Utc};
 use futures::{stream, Future, Stream, StreamExt};
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -21,9 +22,6 @@ fn job_search_url(query: &str, location: &str, offset: u32) -> String {
         );
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-struct Job {}
-
 async fn scrape_job_ids(
     client: Client,
     query: String,
@@ -33,6 +31,7 @@ async fn scrape_job_ids(
     async_stream::stream! {
         loop {
             let url = job_search_url(&query, &location, offset);
+            log::info!("GET {}", url);
             let resp = match client.get(&url).send().await {
                 Ok(resp) => resp,
                 Err(err) => {
@@ -66,23 +65,153 @@ async fn scrape_job_ids(
     }
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+struct Company {
+    name: Option<String>,
+    link: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Job {
+    id: String,
+    title: Option<String>,
+    location: Option<String>,
+    company: Company,
+    posting_date: Option<chrono::DateTime<Utc>>,
+    raw_data: Option<String>,
+    criteria: JobCriteria,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct JobCriteria {
+    seniority: Option<String>,
+    employment_type: Option<String>,
+    job_function: Option<String>,
+    industries: Option<String>,
+}
+
+fn try_convert_age(age: &str) -> Option<chrono::DateTime<Utc>> {
+    let elems = age.split(" ").collect::<Vec<_>>();
+    let unit = *elems.get(1)?;
+    let parse_amount: i64 = (*elems.get(0)?).parse().ok()?;
+    let mut today = Utc::now();
+    match unit.to_lowercase().as_ref() {
+        "days" => today -= Duration::days(parse_amount),
+        "weeks" => today -= Duration::weeks(parse_amount),
+        "years" => today -= Duration::days(parse_amount * 365),
+        _ => {}
+    };
+    Some(today)
+}
+
 pub async fn scrape_job(client: Client, id: String) -> Option<crate::Job> {
-    todo!()
+    let job_link = format!(
+        "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{}",
+        id
+    );
+    log::info!("Sending GET to: {}", job_link);
+    let response = match client.get(job_link).send().await {
+        Ok(resp) => resp,
+        Err(e) => {
+            log::error!("Failed to send request: {}", e);
+            return None;
+        }
+    };
+    let body = match response.text().await {
+        Ok(data) => data,
+        Err(e) => {
+            log::error!("Failed to read response body: {}", e);
+            return None;
+        }
+    };
+    let doc = Html::parse_document(&body);
+    log::info!("Parsed document for job: {}", id);
+
+    let title_selector = Selector::parse(".top-card-layout__title").unwrap();
+    let title = doc
+        .select(&title_selector)
+        .next()
+        .map(|el| el.text().collect::<String>());
+
+    let org_selector = Selector::parse(".topcard__org-name-link").unwrap();
+    let (org_url, org_name) = doc
+        .select(&org_selector)
+        .next()
+        .map(|el| {
+            let org_url = el.value().attr("href").map(String::from);
+            let org_name: String = el
+                .text()
+                .filter(|c| !c.is_empty())
+                .map(str::trim)
+                .collect::<String>();
+            (org_url, Some(org_name))
+        })
+        .unwrap_or((None, None));
+
+    let location_selector =
+        Selector::parse("span.topcard__flavor.topcard__flavor--bullet").unwrap();
+    let loc_name: Option<String> = doc
+        .select(&location_selector)
+        .next()
+        .map(|el| el.text().collect());
+    let age_selector = Selector::parse("span.posted-time-ago__text").unwrap();
+    let age = doc
+        .select(&age_selector)
+        .next()
+        .map(|el| el.text().collect::<String>().trim().to_owned())
+        .map(|s| try_convert_age(&s))
+        .flatten();
+    let raw_data_selector = Selector::parse("div.description__text").unwrap();
+    let raw_data: Option<String> = doc
+        .select(&raw_data_selector)
+        .next()
+        .map(|el| el.text().filter(|c| !c.is_empty()).collect());
+    let criteria_selector = Selector::parse("description__job-criteria-item").unwrap();
+    let criteria: Vec<String> = doc
+        .select(&criteria_selector)
+        .map(|el| el.text().collect())
+        .collect();
+    let seniority = criteria.get(0).map(String::to_owned);
+    let employment_type = criteria.get(1).map(String::to_owned);
+    let job_function = criteria.get(2).map(String::to_owned);
+    let industries = criteria.get(3).map(String::to_owned);
+    let job = Box::new(Job {
+        id,
+        title,
+        location: loc_name,
+        company: Company {
+            name: org_name,
+            link: org_url,
+        },
+        posting_date: age,
+        raw_data,
+        criteria: JobCriteria {
+            seniority,
+            employment_type,
+            job_function,
+            industries,
+        },
+    });
+    Some(crate::Job::Linkedin { job })
 }
 
 pub async fn scrape(
     queries: Vec<String>,
     locations: Vec<String>,
 ) -> impl Stream<Item = impl Future<Output = Option<crate::Job>>> {
+    log::info!("creating client and producing query products");
     let client = Client::new();
-    let product = queries.iter().flat_map(|query| {
-        locations
-            .iter()
-            .map(move |location| (query.to_owned(), location.to_owned()))
-    });
+    let product = queries
+        .iter()
+        .flat_map(|query| {
+            locations
+                .iter()
+                .map(move |location| (query.to_owned(), location.to_owned()))
+        })
+        .collect::<Vec<_>>();
     let id_stream = stream::iter(product)
         .map(|(query, location)| scrape_job_ids(client.clone(), query, location))
-        .buffer_unordered(20)
+        .buffer_unordered(100)
         .flatten()
         .collect::<Vec<_>>()
         .await;
@@ -91,148 +220,23 @@ pub async fn scrape(
         id_stream.len()
     );
     let ids = id_stream.into_iter().flatten().collect::<HashSet<String>>();
-    stream::iter(ids).map(move |job_id| scrape_job(client.clone(), job_id))
+    async_stream::stream! {
+        for id in ids {
+            yield scrape_job(client.clone(), id);
+        }
+    }
 }
 
 #[cfg(test)]
 mod test {
-    use std::{collections::HashSet, time::Duration};
+    use super::*;
 
-    use lazy_static::lazy_static;
-    use regex::Regex;
-    use scraper::{Html, Selector};
-    use thirtyfour::{
-        prelude::{ElementQueryable, ElementWaitable},
-        By, DesiredCapabilities, WebDriver,
-    };
-    use tokio::process::Command;
-
-    fn extract_job_id(job_url: &str) -> Option<&str> {
-        lazy_static! {
-            static ref RE: Regex = Regex::new(r".*-(\d+)\?.*").unwrap();
-        }
-        RE.captures(job_url)?.get(1).map(|m| m.as_str())
+    #[test]
+    fn test_try_convert_age() {
+        let age = "1 day ago";
+        let res = super::try_convert_age(age);
+        assert!(res.is_some());
+        let res = res.unwrap();
+        assert!(res < chrono::Utc::now());
     }
-
-    fn job_search_url(keywords: &str, location: &str, offset: u32) -> String {
-        return format!(
-            "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?location={}&keywords={}&start={}",
-            location, urlencoding::encode(keywords), offset
-        );
-    }
-
-    #[tokio::test]
-    async fn dev() {
-        env_logger::init();
-        let client = reqwest::Client::new();
-        let job_search = job_search_url("Software Engineer Python", "Germany", 500);
-        let response = client.get(job_search).send().await.unwrap();
-        log::info!("Status: {}", response.status());
-        let response = response.text().await.unwrap();
-        let doc = Html::parse_document(&response);
-        let selector = Selector::parse(".base-card__full-link").unwrap();
-        let mut ids = Vec::new();
-        for e in doc.select(&selector) {
-            let url = e.value().attr("href").unwrap();
-            log::info!("Found link: {:?}", url);
-            let job_id = extract_job_id(url).unwrap();
-            log::info!("Found job id: {}", job_id);
-            ids.push(job_id);
-            break;
-        }
-        for id in ids {
-            let job_link = format!(
-                "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{}",
-                id
-            );
-            log::info!("Sending GET to: {}", job_link);
-            let response = client
-                .get(job_link)
-                .send()
-                .await
-                .unwrap()
-                .text()
-                .await
-                .unwrap();
-            let doc = Html::parse_document(&response);
-            log::info!("Parsed document for job: {}", id);
-            let org_selector = Selector::parse(".topcard__org-name-link").unwrap();
-            let org_elem = doc.select(&org_selector).next().unwrap();
-            let org_url = org_elem.value().attr("href").unwrap();
-            let org_name: String = org_elem.text().filter(|c| !c.is_empty()).collect();
-            let location_selector =
-                Selector::parse("span.topcard__flavor.topcard__flavor--bullet").unwrap();
-            let loc_elem = doc.select(&location_selector).next().unwrap();
-            let loc_name: String = loc_elem.text().collect();
-            let age_selector = Selector::parse("span.posted-time-ago__text").unwrap();
-            let age: String = doc.select(&age_selector).next().unwrap().text().collect();
-            let age = age.trim();
-            let raw_data_selector = Selector::parse("div.description__text").unwrap();
-            let raw_data: String = doc
-                .select(&raw_data_selector)
-                .next()
-                .unwrap()
-                .text()
-                .collect();
-
-            log::info!("Org url: {}", org_url);
-            log::info!("Org name: {}", org_name);
-            log::info!("Loc name: {}", loc_name.trim());
-            log::info!("Post age: {}", age.trim());
-            log::info!("Raw job description: {}", raw_data.trim());
-            break;
-        }
-    }
-    // #[tokio::test]
-    // async fn dev() {
-    //     env_logger::init();
-    //     let mut chromedriver = Command::new("chromedriver").spawn().unwrap();
-    //     let mut caps = DesiredCapabilities::chrome();
-    //     // let _ = caps.add_chrome_arg("--headless");
-    //     let driver = WebDriver::new("http://localhost:9515", caps).await.unwrap();
-    //     driver
-    //         .goto("https://www.linkedin.com/jobs/search?location=Germany")
-    //         .await
-    //         .unwrap();
-    //     let cookie_button = driver
-    //         .query(By::Css("[action-type='ACCEPT']"))
-    //         .wait(Duration::from_secs(2), Duration::from_millis(100))
-    //         .first()
-    //         .await
-    //         .unwrap();
-    //     cookie_button.wait_until().clickable().await.unwrap();
-    //     cookie_button.click().await.unwrap();
-    //     log::info!("Clicked button");
-    //     let selector = ".base-card__full-link";
-    //     let mut links: HashSet<String> = HashSet::new();
-    //     loop {
-    //         let search_results = driver.find_all(By::Css(selector)).await.unwrap();
-    //         log::info!("Found {} job cards", search_results.len());
-    //         for result in search_results {
-    //             let url = result.attr("href").await.unwrap().unwrap();
-    //             links.insert(url);
-    //         }
-    //         driver
-    //             .action_chain()
-    //             .send_keys("PageDown")
-    //             .perform()
-    //             .await
-    //             .unwrap();
-    //         let mut keep = String::new();
-    //         let _ = std::io::stdin()
-    //             .read_line(&mut keep)
-    //             .expect("Failed to read line");
-    //         if keep.contains("no") {
-    //             break;
-    //         }
-    //     }
-    //     log::info!("Found {} links", links.len());
-    //
-    //     let mut _trash = String::new();
-    //     std::io::stdin()
-    //         .read_line(&mut _trash)
-    //         .expect("Failed to read line");
-    //     let _ = driver.quit().await;
-    //     chromedriver.kill().await.unwrap();
-    // }
 }

@@ -16,7 +16,9 @@ pub enum Job {
     Instaffo {
         job: Box<instaffo::Job>,
     },
-    Linkedin {},
+    Linkedin {
+        job: Box<linkedin::Job>,
+    },
     Stepstone {},
     Glassdoor {},
     Indeed {},
@@ -28,7 +30,7 @@ impl Hash for Job {
             Job::Xing { job, .. } => {
                 job.hash(state);
             }
-            Job::Linkedin {} => todo!(),
+            Job::Linkedin { job } => todo!(),
             Job::Stepstone {} => todo!(),
             Job::Glassdoor {} => todo!(),
             Job::Indeed {} => todo!(),

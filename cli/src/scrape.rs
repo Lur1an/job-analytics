@@ -1,6 +1,6 @@
 use crate::Target;
 use futures::{
-    stream::{BufferUnordered, Chunks},
+    stream::{self, BufferUnordered, Chunks},
     Future, Stream, StreamExt,
 };
 use job_scraper::Job;
@@ -55,7 +55,24 @@ pub async fn scrape(site: Target) {
                 .chunks(20);
             save_job_stream(results, collection).await;
         }
-        Target::Linkedin => {}
+        Target::Linkedin => {
+            let queries = DEFAULT_SEARCH_QUERIES
+                .into_iter()
+                .map(String::from)
+                .collect();
+            let locations = vec!["Germany".to_owned()];
+            let results = job_scraper::linkedin::scrape(queries, locations)
+                .await
+                .buffer_unordered(200)
+                .filter_map(|j| async move {
+                    match j {
+                        Some(j) => Some(j),
+                        _ => None,
+                    }
+                })
+                .chunks(200);
+            save_job_stream(results, collection).await;
+        }
         _ => {}
     }
 }

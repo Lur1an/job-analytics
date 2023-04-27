@@ -25,7 +25,7 @@ async fn save_job_stream(
     }
 }
 
-pub async fn scrape(site: Target) {
+pub(crate) async fn scrape(site: Target) {
     let mongodb_connection_url =
         std::env::var("MONGODB_CONNECTION_URL").expect("MONGODB_CONNECTION_URL not set");
     let database_name = std::env::var("DATABASE").expect("DATABASE not set");

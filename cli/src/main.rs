@@ -1,4 +1,5 @@
 mod analyze;
+mod fix;
 mod scrape;
 
 use clap::{Parser, Subcommand};
@@ -42,6 +43,7 @@ struct Cli {
 enum Commands {
     Scrape {},
     Analyze {},
+    Fix {},
 }
 
 #[tokio::main]
@@ -53,5 +55,6 @@ async fn main() {
     match args.command {
         Commands::Scrape {} => stream::iter(sites).for_each(scrape::scrape).await,
         Commands::Analyze {} => stream::iter(sites).for_each(analyze::analyze).await,
+        Commands::Fix {} => stream::iter(sites).for_each(fix::fix).await,
     };
 }

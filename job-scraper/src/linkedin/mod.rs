@@ -83,17 +83,17 @@ async fn scrape_job_ids(
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct Company {
-    name: Option<String>,
+pub struct Company {
+    pub name: Option<String>,
     link: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Job {
     pub linkedin_id: String,
-    title: Option<String>,
+    pub title: Option<String>,
     location: Option<String>,
-    company: Company,
+    pub company: Company,
     posting_date: Option<chrono::DateTime<Utc>>,
     raw_data: Option<String>,
     criteria: JobCriteria,

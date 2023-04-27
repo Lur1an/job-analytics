@@ -6,7 +6,7 @@ pub mod xing;
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash, Hasher};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Debug, Deserialize)]
 #[serde(tag = "type")]
 pub enum Job {
     Xing {

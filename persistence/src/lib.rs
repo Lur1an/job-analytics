@@ -7,12 +7,13 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Debug, Deserialize)]
 pub struct ScrapedJob {
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
-    id: Option<ObjectId>,
-    job: job_scraper::Job,
+    pub id: Option<ObjectId>,
+    pub job: job_scraper::Job,
     site_hash: String,
+    pub analyzed: bool,
 }
 
 impl ScrapedJob {
@@ -23,6 +24,7 @@ impl ScrapedJob {
             id: None,
             job,
             site_hash: state.finish().to_string(),
+            analyzed: false,
         }
     }
 }
@@ -38,6 +40,8 @@ pub struct Job {
     link: Option<String>,
     site_hash: String,
 }
+
+pub const COLLECTION_JOBS: &str = "analyzed-jobs";
 
 pub async fn connect(mongodb_connection_url: &str, database_name: &str) -> mongodb::Database {
     let client = mongodb::Client::with_uri_str(mongodb_connection_url)

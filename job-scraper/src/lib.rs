@@ -30,7 +30,10 @@ impl Hash for Job {
             Job::Xing { job, .. } => {
                 job.hash(state);
             }
-            Job::Linkedin { job } => todo!(),
+            Job::Linkedin { job } => {
+                job.linkedin_id.hash(state);
+                "linkedin".hash(state);
+            }
             Job::Stepstone {} => todo!(),
             Job::Glassdoor {} => todo!(),
             Job::Indeed {} => todo!(),

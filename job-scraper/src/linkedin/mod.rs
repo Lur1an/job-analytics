@@ -1,12 +1,17 @@
-use std::{collections::HashSet, iter::Flatten};
-
 use chrono::{Duration, Utc};
 use futures::{stream, Future, Stream, StreamExt};
 use lazy_static::lazy_static;
 use regex::Regex;
-use reqwest::Client;
+use reqwest::header::{
+    HeaderValue, ACCEPT, ACCEPT_LANGUAGE, CACHE_CONTROL, CONNECTION, UPGRADE_INSECURE_REQUESTS,
+    USER_AGENT,
+};
+use reqwest::{header::HeaderMap, Client};
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
+use std::{collections::HashSet, iter::Flatten};
+use tokio::sync::Mutex;
+use tokio::time::sleep;
 
 fn extract_job_id(job_url: &str) -> Option<String> {
     lazy_static! {
@@ -17,9 +22,13 @@ fn extract_job_id(job_url: &str) -> Option<String> {
 
 fn job_search_url(query: &str, location: &str, offset: u32) -> String {
     return format!(
-            "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?location={}&keywords={}&start={}",
+            "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?location={}&keywords={}&start={}&f_TPR=r604800",
             location, urlencoding::encode(query), offset
         );
+}
+
+lazy_static! {
+    static ref SCRAPED_IDS: Mutex<HashSet<String>> = Mutex::new(HashSet::new());
 }
 
 async fn scrape_job_ids(
@@ -47,10 +56,18 @@ async fn scrape_job_ids(
                     break;
                 }
             };
+
+            if status == 429 {
+                log::info!("Rate limit exceeded (Status 429), sleeping...");
+                sleep(Duration::seconds(5).to_std().unwrap()).await;
+                continue;
+            }
+
             if status != 200 {
                 log::error!("Request not successful, status code: {}, body: {}", status, body);
                 break;
             }
+
             let selector = Selector::parse(".base-card__full-link").unwrap();
             let doc = Html::parse_document(&body);
             let ids = doc.select(&selector).map(|el| {
@@ -73,7 +90,7 @@ struct Company {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Job {
-    id: String,
+    pub linkedin_id: String,
     title: Option<String>,
     location: Option<String>,
     company: Company,
@@ -117,6 +134,7 @@ pub async fn scrape_job(client: Client, id: String) -> Option<crate::Job> {
             return None;
         }
     };
+    let status = response.status();
     let body = match response.text().await {
         Ok(data) => data,
         Err(e) => {
@@ -124,6 +142,21 @@ pub async fn scrape_job(client: Client, id: String) -> Option<crate::Job> {
             return None;
         }
     };
+
+    if status == 429 {
+        log::info!("Rate limit exceeded (Status 429), sleeping...");
+        sleep(Duration::seconds(5).to_std().unwrap()).await;
+        return None;
+    }
+
+    if status != 200 {
+        log::error!(
+            "Request not successful, status code: {}, body: {}",
+            status,
+            body
+        );
+        return None;
+    }
     let doc = Html::parse_document(&body);
     log::info!("Parsed document for job: {}", id);
 
@@ -153,7 +186,7 @@ pub async fn scrape_job(client: Client, id: String) -> Option<crate::Job> {
     let loc_name: Option<String> = doc
         .select(&location_selector)
         .next()
-        .map(|el| el.text().collect());
+        .map(|el| el.text().map(str::trim).collect());
     let age_selector = Selector::parse("span.posted-time-ago__text").unwrap();
     let age = doc
         .select(&age_selector)
@@ -165,18 +198,18 @@ pub async fn scrape_job(client: Client, id: String) -> Option<crate::Job> {
     let raw_data: Option<String> = doc
         .select(&raw_data_selector)
         .next()
-        .map(|el| el.text().filter(|c| !c.is_empty()).collect());
-    let criteria_selector = Selector::parse("description__job-criteria-item").unwrap();
+        .map(|el| el.text().filter(|c| !c.is_empty()).map(str::trim).collect());
+    let criteria_selector = Selector::parse(".description__job-criteria-text").unwrap();
     let criteria: Vec<String> = doc
         .select(&criteria_selector)
-        .map(|el| el.text().collect())
+        .map(|el| el.text().map(str::trim).collect())
         .collect();
     let seniority = criteria.get(0).map(String::to_owned);
     let employment_type = criteria.get(1).map(String::to_owned);
     let job_function = criteria.get(2).map(String::to_owned);
     let industries = criteria.get(3).map(String::to_owned);
     let job = Box::new(Job {
-        id,
+        linkedin_id: id,
         title,
         location: loc_name,
         company: Company {
@@ -198,9 +231,20 @@ pub async fn scrape_job(client: Client, id: String) -> Option<crate::Job> {
 pub async fn scrape(
     queries: Vec<String>,
     locations: Vec<String>,
-) -> impl Stream<Item = impl Future<Output = Option<crate::Job>>> {
+) -> impl Stream<Item = Option<crate::Job>> {
     log::info!("creating client and producing query products");
-    let client = Client::new();
+    let mut headers = HeaderMap::new();
+    headers.insert(ACCEPT, HeaderValue::from_static("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9"));
+    headers.insert(ACCEPT_LANGUAGE, HeaderValue::from_static("en-US,en;q=0.9"));
+    headers.insert(CACHE_CONTROL, HeaderValue::from_static("max-age=0"));
+    headers.insert(CONNECTION, HeaderValue::from_static("keep-alive"));
+    headers.insert("sec-fetch-dest", HeaderValue::from_static("document"));
+    headers.insert("sec-fetch-mode", HeaderValue::from_static("navigate"));
+    headers.insert("sec-fetch-site", HeaderValue::from_static("none"));
+    headers.insert("sec-fetch-user", HeaderValue::from_static("?1"));
+    headers.insert(UPGRADE_INSECURE_REQUESTS, HeaderValue::from_static("1"));
+    headers.insert(USER_AGENT, HeaderValue::from_static("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36"));
+    let client = Client::builder().default_headers(headers).build().unwrap();
     let product = queries
         .iter()
         .flat_map(|query| {
@@ -208,21 +252,22 @@ pub async fn scrape(
                 .iter()
                 .map(move |location| (query.to_owned(), location.to_owned()))
         })
-        .collect::<Vec<_>>();
-    let id_stream = stream::iter(product)
-        .map(|(query, location)| scrape_job_ids(client.clone(), query, location))
-        .buffer_unordered(100)
-        .flatten()
-        .collect::<Vec<_>>()
-        .await;
-    log::info!(
-        "Found {} unique job ids, creating output stream of scraped jobs",
-        id_stream.len()
-    );
-    let ids = id_stream.into_iter().flatten().collect::<HashSet<String>>();
+        .collect::<Vec<(String, String)>>();
+    let mut scraped_ids: HashSet<String> = HashSet::new();
     async_stream::stream! {
-        for id in ids {
-            yield scrape_job(client.clone(), id);
+        for (query, location) in product {
+            let id_chunks = scrape_job_ids(client.clone(), query, location).await;
+            tokio::pin!(id_chunks);
+            while let Some(ids) = id_chunks.next().await {
+                for id in ids {
+                    if scraped_ids.contains(&id) {
+                        continue;
+                    }
+                    scraped_ids.insert(id.clone());
+                    let job = scrape_job(client.clone(), id).await;
+                    yield job;
+                }
+            }
         }
     }
 }

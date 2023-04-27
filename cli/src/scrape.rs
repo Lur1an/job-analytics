@@ -63,14 +63,8 @@ pub async fn scrape(site: Target) {
             let locations = vec!["Germany".to_owned()];
             let results = job_scraper::linkedin::scrape(queries, locations)
                 .await
-                .buffer_unordered(200)
-                .filter_map(|j| async move {
-                    match j {
-                        Some(j) => Some(j),
-                        _ => None,
-                    }
-                })
-                .chunks(200);
+                .filter_map(|job| async { job })
+                .chunks(5);
             save_job_stream(results, collection).await;
         }
         _ => {}
